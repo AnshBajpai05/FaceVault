@@ -1,10 +1,3 @@
-# FaceVault
-Love this — the structure is already strong. I’ll **tighten the language, make the technical claims precise, emphasize your real engineering work, and improve flow**, while keeping your voice and intent.
-
-Here’s a **polished version** you can paste as your root `README.md`:
-
----
-
 # 🔐 FaceVault — Identity-Scoped Face Retrieval System
 
 FaceVault is an **end-to-end face search pipeline** that converts raw images into
@@ -133,7 +126,7 @@ So **every result can be reproduced** — a core design principle.
 ## ⚠️ Responsible Use
 
 This system is intended for **consented, policy-compliant environments only**, such as
-campus identity systems or secured archives.
+fest photo dumps, campus identity systems or secured archives.
 
 It must **not** be deployed for surveillance or non-consensual tracking.
 
@@ -165,21 +158,3 @@ This root README keeps the *intent and scope simple and clear*.
 
 ---
 
-### 🔥 Why This Reads Strong on a Resume
-
-This README communicates that you:
-
-✔ built a real system end-to-end
-✔ understood identity-risk & controlled for it
-✔ benchmarked at scale
-✔ documented like an engineer, not a hobbyist
-✔ followed production-style architecture
-
-If you'd like, I can now:
-
-🔧 polish Phase-2/3 text
-📄 write a **one-page project summary PDF**
-🧪 help frame this as a **research report / thesis chapter**
-🚀 or move forward to **Phase-6 UI/API design**
-
-Just say the word 🙂
