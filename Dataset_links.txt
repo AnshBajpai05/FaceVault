@@ -1,0 +1,55 @@
+FaceVault — Dataset Lineage & Download Links
+===========================================
+
+The FaceVault pipeline is published as four sequential datasets.
+Each dataset builds directly on the previous stage.
+
+-------------------------------------------
+PHASE-1 — Face Instance Dataset
+-------------------------------------------
+Raw face instances extracted from source images.
+Includes crops, bounding boxes, metadata & IDs.
+
+https://www.kaggle.com/datasets/anshbajpai2005/facevault-step1-face-instances
+
+
+-------------------------------------------
+PHASE-2 — ArcFace Embeddings (512-D)
+-------------------------------------------
+512-D normalized ArcFace embeddings generated
+for every face instance in Phase-1.
+
+https://www.kaggle.com/datasets/anshbajpai2005/facevault-step2-embeddings
+
+
+-------------------------------------------
+PHASE-3 — Global FAISS Search & Retrieval Engine
+-------------------------------------------
+High-precision FAISS identity retrieval engine
+with benchmark metrics.
+
+https://www.kaggle.com/datasets/anshbajpai2005/facevault-phase3-search
+
+
+-------------------------------------------
+PHASE-4 — Identity-Scoped Search Engine
+-------------------------------------------
+Routing-aware identity-scoped retrieval with
+centroid-adaptive filtering and reliability flags.
+
+https://www.kaggle.com/datasets/anshbajpai2005/facevault-phase4-search
+
+
+-------------------------------------------
+Reproducibility Notes
+-------------------------------------------
+• All embeddings are L2-normalized (512-D ArcFace)
+• face_embedding_index.csv maps face_id → row
+• Metadata preserves identity_id where available
+• Phase-3/4 indexes are FAISS IP (cosine-equivalent)
+• Phase-4 adds routing + centroid filtering + flags
+
+-------------------------------------------
+License
+-------------------------------------------
+Published under CC0-Public Domain for open research use.
