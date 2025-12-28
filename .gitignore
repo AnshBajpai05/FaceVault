@@ -1,0 +1,7 @@
+venv/
+.env/
+env/
+.venv/
+data/
+Test Images/
+Website Images/

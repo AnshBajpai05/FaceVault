@@ -1,0 +1,206 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* FaceVault Design System - Rich Cool Professional Theme
+   Slate blues, deep indigo, soft teal accents — premium and trustworthy
+   All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Core palette - rich cool professional */
+    --background: 216 33% 97%;
+    --foreground: 222 47% 18%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 18%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 18%;
+
+    /* Primary - Deep Slate Blue / Indigo */
+    --primary: 231 52% 36%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Primary variants for gradients */
+    --primary-dark: 224 43% 20%;
+    --primary-light: 220 70% 50%;
+
+    /* Secondary - Lighter slate */
+    --secondary: 220 25% 93%;
+    --secondary-foreground: 222 47% 25%;
+
+    /* Muted - Soft gray-blue */
+    --muted: 216 25% 94%;
+    --muted-foreground: 220 15% 46%;
+
+    /* Accent - Soft Teal */
+    --accent: 168 62% 45%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 4 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 216 20% 88%;
+    --input: 216 20% 88%;
+    --ring: 231 52% 36%;
+
+    --radius: 0.75rem;
+
+    /* Status colors - accessible, colorblind-safe */
+    --status-success: 145 63% 49%;
+    --status-success-bg: 145 50% 94%;
+    --status-success-foreground: 145 65% 25%;
+    
+    --status-warning: 48 89% 50%;
+    --status-warning-bg: 48 85% 94%;
+    --status-warning-foreground: 48 80% 28%;
+    
+    --status-caution: 28 80% 52%;
+    --status-caution-bg: 28 70% 94%;
+    --status-caution-foreground: 28 70% 28%;
+    
+    --status-error: 4 72% 55%;
+    --status-error-bg: 4 65% 95%;
+    --status-error-foreground: 4 60% 32%;
+
+    /* Sidebar */
+    --sidebar-background: 224 43% 20%;
+    --sidebar-foreground: 216 25% 95%;
+    --sidebar-primary: 168 62% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 224 35% 28%;
+    --sidebar-accent-foreground: 216 25% 95%;
+    --sidebar-border: 224 35% 25%;
+    --sidebar-ring: 168 62% 45%;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.05);
+    --shadow-card: 0 2px 8px -2px rgb(0 0 0 / 0.08), 0 4px 16px -4px rgb(0 0 0 / 0.06);
+  }
+
+  .dark {
+    --background: 224 43% 10%;
+    --foreground: 216 25% 95%;
+
+    --card: 224 40% 14%;
+    --card-foreground: 216 25% 95%;
+
+    --popover: 224 40% 14%;
+    --popover-foreground: 216 25% 95%;
+
+    --primary: 220 70% 60%;
+    --primary-foreground: 224 43% 10%;
+
+    --primary-dark: 220 65% 50%;
+    --primary-light: 220 75% 70%;
+
+    --secondary: 224 35% 22%;
+    --secondary-foreground: 216 25% 90%;
+
+    --muted: 224 30% 18%;
+    --muted-foreground: 216 15% 60%;
+
+    --accent: 168 55% 40%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 4 65% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 224 30% 22%;
+    --input: 224 30% 22%;
+    --ring: 220 70% 60%;
+
+    /* Status colors - dark mode */
+    --status-success: 145 55% 48%;
+    --status-success-bg: 145 30% 18%;
+    --status-success-foreground: 145 45% 80%;
+    
+    --status-warning: 48 80% 55%;
+    --status-warning-bg: 48 40% 18%;
+    --status-warning-foreground: 48 70% 85%;
+    
+    --status-caution: 28 75% 55%;
+    --status-caution-bg: 28 40% 18%;
+    --status-caution-foreground: 28 65% 85%;
+    
+    --status-error: 4 60% 55%;
+    --status-error-bg: 4 40% 18%;
+    --status-error-foreground: 4 55% 85%;
+
+    --sidebar-background: 224 45% 8%;
+    --sidebar-foreground: 216 25% 90%;
+    --sidebar-primary: 168 55% 45%;
+    --sidebar-primary-foreground: 224 45% 8%;
+    --sidebar-accent: 224 35% 16%;
+    --sidebar-accent-foreground: 216 25% 90%;
+    --sidebar-border: 224 30% 18%;
+    --sidebar-ring: 168 55% 45%;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.2);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.25), 0 2px 4px -2px rgb(0 0 0 / 0.15);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.25), 0 4px 6px -4px rgb(0 0 0 / 0.15);
+    --shadow-card: 0 2px 8px -2px rgb(0 0 0 / 0.3), 0 4px 16px -4px rgb(0 0 0 / 0.2);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+/* Custom utilities */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 3px;
+  }
+
+  .gradient-header {
+    background: linear-gradient(135deg, hsl(var(--primary-dark)) 0%, hsl(var(--primary)) 50%, hsl(var(--primary-light)) 100%);
+  }
+
+  .gradient-subtle {
+    background: linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--muted)) 100%);
+  }
+
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+
+  .shadow-card-hover {
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+/* Card enhancements */
+@layer components {
+  .card-elevated {
+    @apply bg-card rounded-xl shadow-card border border-border/50;
+  }
+
+  .card-elevated:hover {
+    @apply shadow-card-hover;
+  }
+}
