@@ -1,0 +1,46 @@
+Backend
+ ├── data
+ │   └── VGGFace2
+ │       ├── train
+ │       └── val
+ ├── face_embedding_index.csv
+ ├── face_embeddings.npy
+ ├── facevault_faiss.index
+ ├── id_to_row.pkl
+ ├── identity_centroids.npy
+ ├── identity_faiss.index
+ ├── identity_ids.pkl
+ └── face_metadata.csv
+
+# ---------- Core ----------
+numpy==1.26.4
+pandas==2.2.2
+scikit-learn==1.4.1.post1
+scipy==1.13.1
+
+# ---------- Deep Learning ----------
+torch==2.2.2
+torchvision==0.17.2
+
+# ---------- Face Detection / Embeddings ----------
+facenet-pytorch==2.5.3
+
+# ---------- Similarity Search ----------
+faiss-cpu==1.8.0
+
+# ---------- API Backend ----------
+fastapi==0.115.0
+uvicorn==0.30.6
+python-multipart==0.0.9
+pydantic==2.9.2
+starlette==0.38.5
+
+# ---------- Image Processing ----------
+Pillow==10.4.0
+opencv-python==4.10.0.84
+
+# ---------- Utilities ----------
+tqdm==4.66.5
+joblib==1.4.2
+loguru==0.7.2
+rich==13.9.2
