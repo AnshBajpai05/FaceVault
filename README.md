@@ -246,4 +246,13 @@ FaceVault’s core value is simple:
 
 > **Trust the results — and when you shouldn’t, we tell you.**
 
+Caution : 
+
+VGGFace2 images are NOT included in this repo.
+Users must obtain the dataset from the official source
+and place it under ./data/VGGFace2
+
+This project does NOT distribute biometric data.
+Only derived embeddings + metadata are published.
+
 
