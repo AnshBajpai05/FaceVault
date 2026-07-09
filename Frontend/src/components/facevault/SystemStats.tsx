@@ -78,34 +78,31 @@ export function SystemStats() {
       }
     : loading;
 
+  // No trend arrows — we don't track historical deltas, so we don't fake them.
   const cards = [
     {
       icon: <Activity className="h-5 w-5 text-primary" />,
       label: "Total Queries",
       value: values.total_queries,
       subtext: "Last 30 days",
-      trend: "up" as const,
     },
     {
       icon: <Target className="h-5 w-5 text-primary" />,
       label: "Avg Precision",
       value: values.avg_precision,
       subtext: "Across all searches",
-      trend: "up" as const,
     },
     {
       icon: <AlertTriangle className="h-5 w-5 text-primary" />,
       label: "Ambiguous Rate",
       value: values.ambiguous_rate,
       subtext: "Flagged for review",
-      trend: "down" as const,
     },
     {
       icon: <Users className="h-5 w-5 text-primary" />,
       label: "Identities",
       value: values.new_identities,
-      subtext: "New this month",
-      trend: "neutral" as const,
+      subtext: "Seen in last 30 days",
     },
   ];
 

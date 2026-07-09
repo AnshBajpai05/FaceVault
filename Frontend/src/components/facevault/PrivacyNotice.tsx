@@ -18,22 +18,22 @@ export function PrivacyNotice({ saveQuery, onSaveQueryChange }: PrivacyNoticePro
           <div>
             <p className="text-sm font-medium text-foreground">Privacy Notice</p>
             <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-              Uploaded images are processed in memory and not stored by default. 
-              Query results are returned immediately and then discarded.
+              Uploaded images are processed in memory and never stored.
+              Only a status summary (no image) can be logged to Recent Activity.
             </p>
           </div>
-          
+
           <div className="flex items-center gap-2 pt-1">
             <Checkbox
               id="save-query"
               checked={saveQuery}
               onCheckedChange={(checked) => onSaveQueryChange(checked === true)}
             />
-            <Label 
-              htmlFor="save-query" 
+            <Label
+              htmlFor="save-query"
               className="text-xs cursor-pointer text-muted-foreground"
             >
-              Save this query for analysis (optional)
+              Log this search in Recent Activity (uncheck for a private search)
             </Label>
           </div>
         </div>

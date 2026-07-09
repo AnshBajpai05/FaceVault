@@ -7,6 +7,7 @@ interface StatusBadgeProps {
   size?: 'sm' | 'md' | 'lg';
 }
 
+// Keys match the backend routing statuses exactly
 const statusConfig = {
   accepted: {
     label: 'High Confidence',
@@ -18,16 +19,22 @@ const statusConfig = {
     icon: AlertTriangle,
     className: 'bg-status-warning-bg text-status-warning-foreground border-status-warning/30',
   },
-  low_confidence: {
-    label: 'Use Caution',
+  gray_zone: {
+    label: 'Low Confidence',
     icon: AlertCircle,
     className: 'bg-status-caution-bg text-status-caution-foreground border-status-caution/30',
   },
-  no_match: {
+  new_identity: {
     label: 'No Match',
     icon: XCircle,
     className: 'bg-status-error-bg text-status-error-foreground border-status-error/30',
   },
+} as const;
+
+const fallbackConfig = {
+  label: 'Unknown Status',
+  icon: AlertCircle,
+  className: 'bg-muted text-muted-foreground border-border',
 };
 
 const sizeStyles = {
@@ -43,7 +50,7 @@ const iconSizes = {
 };
 
 export function StatusBadge({ status, size = 'md' }: StatusBadgeProps) {
-  const config = statusConfig[status];
+  const config = statusConfig[status] ?? fallbackConfig;
   const Icon = config.icon;
 
   return (

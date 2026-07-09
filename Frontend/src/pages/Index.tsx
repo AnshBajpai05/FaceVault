@@ -17,7 +17,7 @@ export default function Index() {
   const {
     imagePreview,
     detectedFaces,
-    selectedFace,
+    selectedFaces,
     searchState,
     searchResults,
     saveQuery,
@@ -25,7 +25,7 @@ export default function Index() {
     handleImageUpload,
     handleSearch,
     resetSearch,
-    setSelectedFace,
+    setSelectedFaces,
     setSaveQuery,
     updateDeveloperSetting,
   } = useFaceVault();
@@ -34,7 +34,7 @@ export default function Index() {
   const isSearching = searchState.step !== 'idle' && searchState.step !== 'complete' && searchState.step !== 'error';
   const hasResults = searchResults !== null && searchState.step === 'complete';
   const showDashboard = !isSearching && !hasResults;
-  const canSearch = selectedFace !== null && !isSearching && detectedFaces.length > 0;
+  const canSearch = selectedFaces.length > 0 && !isSearching && detectedFaces.length > 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -101,8 +101,13 @@ export default function Index() {
                   onImageUpload={handleImageUpload}
                   imagePreview={imagePreview}
                   detectedFaces={detectedFaces}
-                  selectedFace={selectedFace}
-                  onSelectFace={setSelectedFace}
+                  selectedFaces={selectedFaces}
+                  onToggleFace={(id) => {
+                    setSelectedFaces(prev => 
+                      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+                    );
+                  }}
+                  onSelectAllFaces={() => setSelectedFaces(detectedFaces.map(f => f.id))}
                   onClear={resetSearch}
                   onSearch={handleSearch}
                   canSearch={canSearch}
