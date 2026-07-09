@@ -38,8 +38,11 @@ jobs:
           cache: npm
           cache-dependency-path: Frontend/package-lock.json
 
+      # npm install (not ci): the lock file is generated on Windows and npm
+      # omits linux-only optional native deps (npm/cli optional-deps bug),
+      # which makes `npm ci` fail on ubuntu runners.
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Unit tests (vitest)
         run: npm test
