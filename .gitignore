@@ -1,7 +1,27 @@
+# Python
 venv/
 .env/
 env/
 .venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Data (never commit biometric data or derived indexes)
 data/
 Test Images/
 Website Images/
+*.jsonl
+
+# Kaggle output copies (duplicates of EDA/)
+EDA/kaggle/
+
+# Node / frontend build
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Editor / OS
+.DS_Store
+Thumbs.db
