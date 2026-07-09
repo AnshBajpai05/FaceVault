@@ -30,6 +30,17 @@ from fastapi.responses import FileResponse, StreamingResponse
 from facenet_pytorch import MTCNN, InceptionResnetV1
 from PIL import Image
 
+from logic import (
+    MIN_RETRY,
+    THRESH_STRONG,
+    THRESH_WEAK,
+    choose_threshold,
+    clamp_box,
+    normalize,
+    replay_feedback,
+    route_status,
+)
+
 # =========================================================
 #                  APP + CORS + TIMING
 # =========================================================
@@ -109,24 +120,15 @@ FEEDBACK_FILE = os.path.join(DATA_DIR, "feedback_log.jsonl")
 
 def load_feedback_state():
     """Replay the persisted feedback log; later records override earlier ones."""
-    rejected, promoted = set(), set()
+    records = []
     if os.path.exists(FEEDBACK_FILE):
         with open(FEEDBACK_FILE, encoding="utf-8") as f:
             for line in f:
                 try:
-                    rec = json.loads(line)
+                    records.append(json.loads(line))
                 except ValueError:
                     continue
-                fid = str(rec.get("face_id", ""))
-                if not fid:
-                    continue
-                if rec.get("action") == "reject_false_positive":
-                    rejected.add(fid)
-                    promoted.discard(fid)
-                elif rec.get("action") == "promote":
-                    promoted.add(fid)
-                    rejected.discard(fid)
-    return rejected, promoted
+    return replay_feedback(records)
 
 
 # Human-in-the-loop corrections applied to every subsequent search:
@@ -136,16 +138,9 @@ REJECTED_FACE_IDS, PROMOTED_FACE_IDS = load_feedback_state()
 
 
 # =========================================================
-#                CONSTANTS — PHASE-4
+#     CONSTANTS — PHASE-4 (thresholds live in logic.py)
 # =========================================================
-MIN_ACCEPT = 0.60   # routing: accept identity outright
-MIN_GRAY = 0.55     # routing: ambiguous band
-MIN_RETRY = 0.50    # routing: gray-zone retry floor
-MARGIN_REQ = 0.05   # required gap between best and second identity
 TOP_K_ID = 5
-
-THRESH_STRONG = 0.60
-THRESH_WEAK = 0.45
 MAX_ITERS = 3
 TOP_K = 800
 
@@ -153,26 +148,12 @@ TOP_K = 800
 # =========================================================
 #                     HELPERS
 # =========================================================
-def normalize(v):
-    v = np.asarray(v).astype("float32")
-    return v / (np.linalg.norm(v) + 1e-10)
-
-
-def clamp_box(img_pil, x1, y1, x2, y2):
-    x1 = max(0, int(x1))
-    y1 = max(0, int(y1))
-    x2 = min(img_pil.width, int(x2))
-    y2 = min(img_pil.height, int(y2))
-    if x2 <= x1 or y2 <= y1:
-        return None
-    return x1, y1, x2, y2
-
-
 def crop_box(img_pil, box):
     """Crop the face region for an explicit bounding box {x, y, width, height}."""
     try:
         coords = clamp_box(
-            img_pil,
+            img_pil.width,
+            img_pil.height,
             box["x"],
             box["y"],
             box["x"] + box["width"],
@@ -215,7 +196,7 @@ def detect_best_crop(img_pil):
 
     i = int(np.argmax(probs)) if probs is not None else 0
     x1, y1, x2, y2 = boxes[i]
-    coords = clamp_box(img_pil, x1, y1, x2, y2)
+    coords = clamp_box(img_pil.width, img_pil.height, x1, y1, x2, y2)
     if coords is None:
         return None
     return img_pil.crop(coords)
@@ -236,17 +217,8 @@ def predict_identity(query_vec):
     second_sim = float(sims[1]) if len(sims) > 1 else -1.0
     margin = best_sim - second_sim
 
-    if best_sim >= MIN_ACCEPT and margin >= MARGIN_REQ:
-        status = "accepted"
-    elif best_sim >= MIN_GRAY:
-        status = "ambiguous"
-    elif best_sim >= MIN_RETRY:
-        status = "gray_zone"
-    else:
-        status = "new_identity"
-
     return dict(
-        status=status,
+        status=route_status(best_sim, margin),
         identity_id=best_id,
         best_sim=best_sim,
         second_sim=second_sim,
@@ -324,22 +296,12 @@ def build_centroid(df):
     return centroid, float(np.mean(sims))
 
 
-def choose_threshold_phase4(cmean, status):
-    if status in ("gray_zone", "ambiguous"):
-        return 0.55
-    if cmean > 0.80:
-        return 0.45
-    if cmean > 0.70:
-        return 0.48
-    return 0.50
-
-
 def final_filter(df, identity_id, status):
     if len(df) == 0:
         return df, 0.0, 0.0, 0.0, True, ["no_candidates"]
 
     centroid, cmean = build_centroid(df)
-    thresh = choose_threshold_phase4(cmean, status)
+    thresh = choose_threshold(cmean, status)
 
     df = df.copy()
     idx = [ID_TO_ROW[fid] for fid in df.face_id]

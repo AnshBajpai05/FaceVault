@@ -6,7 +6,7 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
 ![FAISS](https://img.shields.io/badge/FAISS-1.8-blue)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.2-EE4C2C?logo=pytorch&logoColor=white)
-![Tests](https://img.shields.io/badge/frontend_tests-passing-brightgreen)
+![CI](https://github.com/AnshBajpai05/FaceVault/actions/workflows/ci.yml/badge.svg?branch=V2)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 FaceVault is an **end-to-end identity-aware face search pipeline** that converts raw
@@ -297,6 +297,13 @@ npm run dev                        # http://localhost:5173
 
 Point the UI at a non-default backend with `VITE_API_ROOT`.
 Allowed CORS origins are configurable via `FACEVAULT_CORS_ORIGINS`.
+
+**Tests** (also run in CI on every push):
+
+```bash
+cd Backend && pip install pytest && pytest tests -q   # 23 logic tests, no GPU/data needed
+cd Frontend && npm test                               # 8 vitest tests
+```
 
 ---
 

@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main, V2]
+  pull_request:
+
+jobs:
+  backend-tests:
+    name: Backend logic tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # logic.py is deliberately dependency-light — no torch/faiss needed
+      - name: Install test dependencies
+        run: pip install numpy pytest
+
+      - name: Run tests
+        run: pytest Backend/tests -q
+
+  frontend:
+    name: Frontend tests + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: Frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests (vitest)
+        run: npm test
+
+      - name: Type-check + build
+        run: npm run build
