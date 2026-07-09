@@ -26,7 +26,7 @@ function makeResponse(overrides: Partial<SearchResponse> = {}): SearchResponse {
     cluster: {
       centroid_similarity: 0.75,
       threshold_used: 0.5,
-      precision_estimate: 0.95,
+      strong_match_ratio: 0.95,
       flagged_unreliable: false,
       flags: [],
     },

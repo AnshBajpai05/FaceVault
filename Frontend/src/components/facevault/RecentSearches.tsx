@@ -5,7 +5,7 @@ import { Clock, CheckCircle2, AlertTriangle, XCircle, Search } from "lucide-reac
 interface RecentItem {
   timestamp: string;
   status: string;
-  precision: number;
+  strong_ratio: number;
   identity: string | null;
 }
 
@@ -108,7 +108,7 @@ export function RecentSearches() {
               <tr>
                 <th className="px-5 py-3 text-left font-medium">Time</th>
                 <th className="px-5 py-3 text-left font-medium">Identity</th>
-                <th className="px-5 py-3 text-left font-medium">Precision</th>
+                <th className="px-5 py-3 text-left font-medium">Strong Matches</th>
                 <th className="px-5 py-3 text-left font-medium">Status</th>
               </tr>
             </thead>
@@ -124,12 +124,11 @@ export function RecentSearches() {
                   </td>
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-foreground">{Math.round(r.precision * 100)}%</span>
-                      {/* Optional little mini-bar for precision */}
+                      <span className="font-medium text-foreground">{Math.round(r.strong_ratio * 100)}%</span>
                       <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden hidden sm:block">
-                        <div 
-                          className="h-full bg-primary" 
-                          style={{ width: `${Math.round(r.precision * 100)}%` }} 
+                        <div
+                          className="h-full bg-primary"
+                          style={{ width: `${Math.round(r.strong_ratio * 100)}%` }}
                         />
                       </div>
                     </div>

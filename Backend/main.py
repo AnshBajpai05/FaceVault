@@ -6,10 +6,13 @@ Pipeline per query face:
   filtering -> confidence grouping.
 
 Run:  uvicorn main:app --reload
+Configuration: FACEVAULT_* environment variables (see config.py).
 """
 
+import hashlib
 import io
 import json
+import logging
 import mimetypes
 import os
 import pickle
@@ -17,19 +20,30 @@ import threading
 import time
 import uuid
 import zipfile
-from collections import deque
-from datetime import datetime, timedelta, timezone
+from collections import defaultdict, deque
 
 import faiss
 import numpy as np
 import pandas as pd
 import torch
-from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import (
+    Body,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from facenet_pytorch import MTCNN, InceptionResnetV1
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
+import db
+from config import settings
 from logic import (
     MIN_RETRY,
     THRESH_STRONG,
@@ -41,26 +55,18 @@ from logic import (
     route_status,
 )
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("facevault")
+log.info("Effective settings: %s", settings.summary())
+
 # =========================================================
 #                  APP + CORS + TIMING
 # =========================================================
-app = FastAPI(title="FaceVault Backend", version="1.0.0")
-
-# Wildcard origins with credentials is rejected by browsers; pin origins
-# and allow overriding for deployment via env var.
-ALLOWED_ORIGINS = [
-    o.strip()
-    for o in os.getenv(
-        "FACEVAULT_CORS_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,"
-        "http://localhost:8080,http://127.0.0.1:8080",
-    ).split(",")
-    if o.strip()
-]
+app = FastAPI(title="FaceVault Backend", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=settings.origins_list(),
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Process-Time"],
@@ -77,12 +83,103 @@ async def add_process_time_header(request: Request, call_next):
 
 
 # =========================================================
-#                  MODELS (same as Phase-4)
+#             SECURITY: API KEY + RATE LIMIT
+# =========================================================
+def require_api_key(x_api_key: str = Header(None)):
+    """Enforced only when FACEVAULT_API_KEY is set; open in local dev."""
+    if settings.api_key and x_api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail="invalid_api_key")
+
+
+_RATE_BUCKETS = defaultdict(deque)
+_RATE_LOCK = threading.Lock()
+
+
+def rate_limit(request: Request):
+    """Sliding-window per-IP limit on inference endpoints."""
+    limit = settings.rate_limit_per_minute
+    if limit <= 0:
+        return
+    key = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    with _RATE_LOCK:
+        bucket = _RATE_BUCKETS[key]
+        while bucket and now - bucket[0] > 60.0:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            raise HTTPException(status_code=429, detail="rate_limit_exceeded")
+        bucket.append(now)
+
+
+GUARDED = [Depends(require_api_key), Depends(rate_limit)]
+
+
+def read_image_upload(image: UploadFile):
+    """Decode an uploaded image with size, validity, and pixel-count guards."""
+    contents = image.file.read(settings.max_upload_bytes + 1)
+    if len(contents) > settings.max_upload_bytes:
+        raise HTTPException(status_code=413, detail="upload_too_large")
+    try:
+        img = Image.open(io.BytesIO(contents))
+        img.verify()  # cheap structural check before full decode
+        img = Image.open(io.BytesIO(contents)).convert("RGB")
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
+        raise HTTPException(status_code=400, detail="invalid_image")
+    if img.width * img.height > settings.max_image_pixels:
+        raise HTTPException(status_code=400, detail="image_too_large")
+    return img
+
+
+# =========================================================
+#          MODELS (weights vendored + hash-pinned)
 # =========================================================
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 mtcnn = MTCNN(keep_all=True, device=device)
-embed_model = InceptionResnetV1(pretrained="vggface2").eval().to(device)
+
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def load_embed_model():
+    """Load InceptionResnetV1 from a local, hash-verifiable weights file.
+
+    First run without a local file falls back to the facenet-pytorch download,
+    then vendors the weights to settings.weights_path and logs their SHA-256
+    so it can be pinned via FACEVAULT_WEIGHTS_SHA256. After that, startup
+    never needs the network.
+    """
+    path = settings.weights_path
+    if os.path.exists(path):
+        if settings.weights_sha256:
+            digest = _sha256(path)
+            if digest != settings.weights_sha256.lower():
+                raise RuntimeError(
+                    f"Weights hash mismatch for {path}: got {digest}, "
+                    f"expected {settings.weights_sha256}"
+                )
+        model = InceptionResnetV1(num_classes=8631)  # vggface2 head shape
+        model.load_state_dict(torch.load(path, map_location="cpu"))
+        log.info("Loaded embedding weights from %s", path)
+    else:
+        log.warning("Local weights not found at %s — downloading once", path)
+        model = InceptionResnetV1(pretrained="vggface2")
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        torch.save(model.state_dict(), path)
+        log.info(
+            "Vendored weights to %s (sha256=%s) — set FACEVAULT_WEIGHTS_SHA256 to pin",
+            path,
+            _sha256(path),
+        )
+    return model.eval().to(device)
+
+
+embed_model = load_embed_model()
 
 # Endpoints are plain `def`, so FastAPI runs them in a threadpool; serialize
 # model access since the models are shared across those threads.
@@ -92,7 +189,7 @@ INFERENCE_LOCK = threading.Lock()
 # =========================================================
 #                  DATA ASSETS
 # =========================================================
-DATA_DIR = "data"
+DATA_DIR = settings.data_dir
 BASE_IMG_DIR = os.path.join(DATA_DIR, "VGGFace2")
 
 META_DF = pd.read_csv(f"{DATA_DIR}/face_metadata.csv")
@@ -110,39 +207,37 @@ identity_index = faiss.read_index(f"{DATA_DIR}/identity_faiss.index")
 
 
 # =========================================================
-#              IN-MEMORY STATE (all bounded)
+#        PERSISTENT STATE (SQLite) + HITL FEEDBACK
 # =========================================================
-RECENT_SEARCHES = deque(maxlen=100)
-SEARCH_LOG = deque(maxlen=5000)
-FEEDBACK_LOG = deque(maxlen=1000)
-FEEDBACK_FILE = os.path.join(DATA_DIR, "feedback_log.jsonl")
+db.init(os.path.join(DATA_DIR, "facevault.db"))
 
-
-def load_feedback_state():
-    """Replay the persisted feedback log; later records override earlier ones."""
-    records = []
-    if os.path.exists(FEEDBACK_FILE):
-        with open(FEEDBACK_FILE, encoding="utf-8") as f:
-            for line in f:
-                try:
-                    records.append(json.loads(line))
-                except ValueError:
-                    continue
-    return replay_feedback(records)
-
+# One-time migration from the pre-SQLite JSONL feedback log
+_LEGACY_FEEDBACK = os.path.join(DATA_DIR, "feedback_log.jsonl")
+if os.path.exists(_LEGACY_FEEDBACK):
+    with open(_LEGACY_FEEDBACK, encoding="utf-8") as f:
+        legacy = []
+        for line in f:
+            try:
+                legacy.append(json.loads(line))
+            except ValueError:
+                continue
+    migrated = db.import_legacy_feedback(legacy)
+    if migrated:
+        log.info("Migrated %d legacy feedback records into SQLite", migrated)
 
 # Human-in-the-loop corrections applied to every subsequent search:
 # rejected faces are excluded from results, promoted faces are always
-# grouped as high-confidence.
-REJECTED_FACE_IDS, PROMOTED_FACE_IDS = load_feedback_state()
+# grouped as high-confidence. Replayed from the database at startup.
+REJECTED_FACE_IDS, PROMOTED_FACE_IDS = replay_feedback(db.all_feedback_ordered())
+log.info(
+    "Feedback state: %d rejected, %d promoted",
+    len(REJECTED_FACE_IDS),
+    len(PROMOTED_FACE_IDS),
+)
 
-
-# =========================================================
-#     CONSTANTS — PHASE-4 (thresholds live in logic.py)
-# =========================================================
-TOP_K_ID = 5
-MAX_ITERS = 3
-TOP_K = 800
+TOP_K_ID = settings.top_k_identities
+MAX_ITERS = settings.max_expansion_iters
+TOP_K = settings.top_k_results
 
 
 # =========================================================
@@ -246,12 +341,18 @@ def faiss_search_identity(vec, identity_id):
 
 
 def recursive_face_search_identity(query_vec, identity_id):
-    """Phase-4 recursive cluster expansion around the query."""
+    """Phase-4 recursive cluster expansion around the query.
+
+    Also measures total centroid drift (L2 displacement summed across
+    iterations) so downstream consumers can audit expansion stability —
+    a drifting centroid means weak matches are pulling the cluster.
+    """
     centroid = normalize(query_vec)
     all_hits = pd.DataFrame()
     flagged_bad = False
     reason = []
     last_count = 0
+    total_drift = 0.0
 
     for _ in range(MAX_ITERS):
         hits = faiss_search_identity(centroid, identity_id)
@@ -276,13 +377,15 @@ def recursive_face_search_identity(query_vec, identity_id):
         )
 
         idx = [ID_TO_ROW[fid] for fid in all_hits.face_id]
-        centroid = normalize(EMB[idx].mean(axis=0))
+        new_centroid = normalize(EMB[idx].mean(axis=0))
+        total_drift += float(np.linalg.norm(new_centroid - centroid))
+        centroid = new_centroid
 
         if len(all_hits) == last_count:
             break
         last_count = len(all_hits)
 
-    return all_hits, flagged_bad, reason
+    return all_hits, flagged_bad, reason, total_drift
 
 
 # =========================================================
@@ -296,7 +399,14 @@ def build_centroid(df):
     return centroid, float(np.mean(sims))
 
 
-def final_filter(df, identity_id, status):
+def final_filter(df, status):
+    """Centroid-similarity filtering with an honest quality signal.
+
+    Note: results are already identity-scoped, so "precision vs the routed
+    identity" would be 1.0 by construction and is deliberately NOT reported.
+    strong_match_ratio (share of surviving results with high centroid
+    similarity) is the meaningful runtime confidence signal.
+    """
     if len(df) == 0:
         return df, 0.0, 0.0, 0.0, True, ["no_candidates"]
 
@@ -312,13 +422,11 @@ def final_filter(df, identity_id, status):
     if len(filtered) == 0:
         return filtered, 0.0, cmean, thresh, True, ["empty_after_filter"]
 
-    precision = float((filtered.identity_id == identity_id).mean())
     strong_count = int((filtered.cos_centroid >= 0.55).sum())
+    strong_ratio = strong_count / len(filtered)
 
-    bad = precision < 0.50 or strong_count < 5 or cmean < 0.50
+    bad = strong_count < 5 or cmean < 0.50
     reasons = []
-    if precision < 0.50:
-        reasons.append("precision<0.5")
     if strong_count < 5:
         reasons.append("few_strong_matches")
     if cmean < 0.50:
@@ -326,7 +434,7 @@ def final_filter(df, identity_id, status):
     if status == "gray_zone":
         reasons.append("low_confidence_identity_assignment")
 
-    return filtered, precision, cmean, thresh, bad, reasons
+    return filtered, float(strong_ratio), cmean, thresh, bad, reasons
 
 
 # =========================================================
@@ -354,7 +462,7 @@ def run_identity_search(q_vec, log_this=True):
             routing_reasons.append("fallback_retry_low_confidence")
         else:
             if log_this:
-                log_search(status, 0.0, None)
+                db.record_search(status, 0.0, None)
             return {
                 "query_id": str(uuid.uuid4()),
                 "faces_detected": 1,
@@ -364,11 +472,15 @@ def run_identity_search(q_vec, log_this=True):
                 "timings": {"search_ms": (time.perf_counter() - t0) * 1000},
             }
 
-    results_df, flagged_bad, reasons = recursive_face_search_identity(q_vec, identity)
-    final_df, prec, cmean, thr, bad2, why2 = final_filter(results_df, identity, status)
+    results_df, flagged_bad, reasons, drift = recursive_face_search_identity(
+        q_vec, identity
+    )
+    final_df, strong_ratio, cmean, thr, bad2, why2 = final_filter(results_df, status)
 
     bad = routing_flagged or flagged_bad or bad2
     why = reasons + why2 + routing_reasons
+    if drift > 0.25:
+        why.append("centroid_drift_high")
 
     # Apply human-in-the-loop corrections from previous sessions
     results = []
@@ -396,7 +508,7 @@ def run_identity_search(q_vec, log_this=True):
         why.append(f"human_feedback_excluded_{excluded}")
 
     if log_this:
-        log_search(status, prec, identity)
+        db.record_search(status, strong_ratio, identity)
 
     return {
         "query_id": str(uuid.uuid4()),
@@ -405,28 +517,14 @@ def run_identity_search(q_vec, log_this=True):
         "cluster": {
             "centroid_similarity": cmean,
             "threshold_used": thr,
-            "precision_estimate": prec,
+            "strong_match_ratio": strong_ratio,
+            "centroid_drift": drift,
             "flagged_unreliable": bad,
             "flags": why,
         },
         "results": results,
         "timings": {"search_ms": (time.perf_counter() - t0) * 1000},
     }
-
-
-def log_search(status, precision, identity):
-    now = datetime.now(timezone.utc)
-    SEARCH_LOG.append(
-        dict(ts=now, identity=identity, precision=precision, status=status)
-    )
-    RECENT_SEARCHES.appendleft(
-        {
-            "timestamp": now.isoformat(),
-            "status": status,
-            "precision": precision,
-            "identity": identity,
-        }
-    )
 
 
 def resolve_photo_path(face_id: str):
@@ -458,6 +556,7 @@ def health():
         "device": device,
         "faces_indexed": len(FACE_IDS),
         "identities": len(IDENTITY_IDS),
+        "auth_enabled": bool(settings.api_key),
         "feedback": {
             "rejected": len(REJECTED_FACE_IDS),
             "promoted": len(PROMOTED_FACE_IDS),
@@ -465,9 +564,9 @@ def health():
     }
 
 
-@app.post("/api/v1/detect-faces")
+@app.post("/api/v1/detect-faces", dependencies=GUARDED)
 def detect_faces(image: UploadFile = File(...)):
-    img = Image.open(io.BytesIO(image.file.read())).convert("RGB")
+    img = read_image_upload(image)
 
     with INFERENCE_LOCK:
         boxes, probs = mtcnn.detect(img)
@@ -493,7 +592,7 @@ def detect_faces(image: UploadFile = File(...)):
     return faces
 
 
-@app.post("/api/v1/search")
+@app.post("/api/v1/search", dependencies=GUARDED)
 def search_face(
     image: UploadFile = File(...),
     boxes: str = Form(None),
@@ -505,13 +604,13 @@ def search_face(
     the faces the user actually selected in the UI. Without it, the single
     highest-confidence face is searched (legacy behavior).
 
-    `log_query=false` runs the search without writing it to the recent-search
-    log (the UI privacy toggle).
+    `log_query=false` runs the search without writing it to the search log
+    (the UI privacy toggle).
 
     Returns one response object for a single query face, or a list of
     response objects for a multi-face query.
     """
-    img = Image.open(io.BytesIO(image.file.read())).convert("RGB")
+    img = read_image_upload(image)
     log_this = str(log_query).lower() != "false"
 
     query_boxes = None
@@ -549,7 +648,7 @@ def get_photo(face_id: str):
     return FileResponse(path, media_type=media_type)
 
 
-@app.post("/api/v1/download-results")
+@app.post("/api/v1/download-results", dependencies=[Depends(require_api_key)])
 def download_results(payload: dict = Body(...)):
     face_ids = [str(f) for f in payload.get("face_ids", [])]
     if not face_ids:
@@ -578,12 +677,12 @@ def download_results(payload: dict = Body(...)):
     )
 
 
-@app.post("/api/v1/feedback")
+@app.post("/api/v1/feedback", dependencies=[Depends(require_api_key)])
 def submit_feedback(payload: dict = Body(...)):
     """Record human-in-the-loop corrections (promote / reject-false-positive).
 
-    Kept in a bounded in-memory log and appended to a JSONL file so feedback
-    survives restarts and can later drive threshold recalibration.
+    Persisted in SQLite and applied to every future search; replayed at
+    startup so corrections survive restarts.
     """
     action = payload.get("action")
     face_id = str(payload.get("face_id", "")).strip()
@@ -591,15 +690,7 @@ def submit_feedback(payload: dict = Body(...)):
     if action not in ("promote", "reject_false_positive") or not face_id:
         raise HTTPException(status_code=400, detail="invalid_feedback")
 
-    record = {
-        "id": str(uuid.uuid4()),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "action": action,
-        "face_id": face_id,
-        "threshold_used": payload.get("threshold_used"),
-    }
-
-    FEEDBACK_LOG.appendleft(record)
+    record = db.record_feedback(action, face_id, payload.get("threshold_used"))
 
     # Apply immediately to future searches
     if action == "reject_false_positive":
@@ -609,43 +700,19 @@ def submit_feedback(payload: dict = Body(...)):
         PROMOTED_FACE_IDS.add(face_id)
         REJECTED_FACE_IDS.discard(face_id)
 
-    try:
-        with open(FEEDBACK_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
-    except OSError:
-        pass  # in-memory record still stands; don't fail the request
-
     return {"status": "recorded", "id": record["id"]}
 
 
 @app.get("/api/v1/feedback")
 def list_feedback():
-    return list(FEEDBACK_LOG)
+    return db.recent_feedback()
 
 
 @app.get("/api/v1/stats")
 def get_stats():
-    now = datetime.now(timezone.utc)
-    cutoff_30 = now - timedelta(days=30)
-
-    recent = [x for x in SEARCH_LOG if x["ts"] >= cutoff_30]
-    total_queries = len(recent)
-
-    avg_precision = (
-        sum(x["precision"] for x in recent) / total_queries if total_queries else 0.0
-    )
-    ambiguous = [x for x in recent if x["status"] in ("ambiguous", "gray_zone")]
-    ambiguous_rate = len(ambiguous) / total_queries * 100 if total_queries else 0.0
-    identities_seen = len({x["identity"] for x in recent if x["identity"]})
-
-    return dict(
-        total_queries=total_queries,
-        avg_precision=avg_precision,
-        ambiguous_rate=ambiguous_rate,
-        new_identities=identities_seen,
-    )
+    return db.stats(days=30)
 
 
 @app.get("/api/v1/recent-searches")
 def get_recent_searches():
-    return list(RECENT_SEARCHES)
+    return db.recent_searches(limit=100)

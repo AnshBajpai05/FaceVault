@@ -26,7 +26,13 @@ export interface RoutingInfo {
 export interface ClusterInfo {
   centroid_similarity: number;
   threshold_used: number;
-  precision_estimate: number;
+  /** Share of surviving results with high centroid similarity — the honest
+   * runtime confidence signal (identity-scoped precision would be 1.0 by
+   * construction, so the backend no longer reports it). */
+  strong_match_ratio: number;
+  /** Total centroid displacement during recursive expansion; high values mean
+   * weak matches pulled the cluster. */
+  centroid_drift?: number;
   flagged_unreliable: boolean;
   flags: string[];
 }

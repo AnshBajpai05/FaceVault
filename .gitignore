@@ -9,6 +9,8 @@ __pycache__/
 
 # Data (never commit biometric data or derived indexes)
 data/
+Backend/models/
+*.db
 Test Images/
 Website Images/
 *.jsonl

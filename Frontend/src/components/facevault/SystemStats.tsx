@@ -49,9 +49,9 @@ function StatCard({ icon, label, value, subtext, trend }: StatCardProps) {
 export function SystemStats() {
   const [stats, setStats] = useState<null | {
     total_queries: number;
-    avg_precision: number;
+    avg_strong_ratio: number;
     ambiguous_rate: number;
-    new_identities: number;
+    identities_seen: number;
   }>(null);
 
   useEffect(() => {
@@ -64,17 +64,17 @@ export function SystemStats() {
   // 🟦 nice loading placeholders
   const loading = {
     total_queries: "—",
-    avg_precision: "—",
+    avg_strong_ratio: "—",
     ambiguous_rate: "—",
-    new_identities: "—",
+    identities_seen: "—",
   };
 
   const values = stats
     ? {
         total_queries: stats.total_queries.toLocaleString(),
-        avg_precision: (stats.avg_precision * 100).toFixed(1) + "%",
+        avg_strong_ratio: (stats.avg_strong_ratio * 100).toFixed(1) + "%",
         ambiguous_rate: stats.ambiguous_rate.toFixed(1) + "%",
-        new_identities: stats.new_identities.toString(),
+        identities_seen: stats.identities_seen.toString(),
       }
     : loading;
 
@@ -88,8 +88,8 @@ export function SystemStats() {
     },
     {
       icon: <Target className="h-5 w-5 text-primary" />,
-      label: "Avg Precision",
-      value: values.avg_precision,
+      label: "Avg Strong-Match Ratio",
+      value: values.avg_strong_ratio,
       subtext: "Across all searches",
     },
     {
@@ -101,7 +101,7 @@ export function SystemStats() {
     {
       icon: <Users className="h-5 w-5 text-primary" />,
       label: "Identities",
-      value: values.new_identities,
+      value: values.identities_seen,
       subtext: "Seen in last 30 days",
     },
   ];

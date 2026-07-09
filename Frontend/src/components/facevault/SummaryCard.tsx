@@ -81,8 +81,8 @@ export function SummaryCard({ response, showDetails = false }: SummaryCardProps)
             value={cluster ? `${(cluster.centroid_similarity * 100).toFixed(1)}%` : '—'}
           />
           <MetricItem
-            label="Precision Estimate"
-            value={cluster ? `${(cluster.precision_estimate * 100).toFixed(0)}%` : '—'}
+            label="Strong-Match Ratio"
+            value={cluster ? `${(cluster.strong_match_ratio * 100).toFixed(0)}%` : '—'}
           />
         </div>
 
@@ -138,6 +138,12 @@ export function SummaryCard({ response, showDetails = false }: SummaryCardProps)
                 label="Flags"
                 value={cluster && cluster.flags.length > 0 ? cluster.flags.join(', ') : 'None'}
               />
+              {cluster?.centroid_drift !== undefined && (
+                <DetailItem
+                  label="Centroid Drift"
+                  value={cluster.centroid_drift.toFixed(3)}
+                />
+              )}
               {response.timings && (
                 <DetailItem
                   label="Backend Search Time"

@@ -296,7 +296,13 @@ npm run dev                        # http://localhost:5173
 ```
 
 Point the UI at a non-default backend with `VITE_API_ROOT`.
-Allowed CORS origins are configurable via `FACEVAULT_CORS_ORIGINS`.
+
+All backend tunables are `FACEVAULT_*` environment variables (see `Backend/config.py`):
+CORS origins, optional API key (`FACEVAULT_API_KEY` → clients must send `X-API-Key`),
+rate limits, upload caps, retrieval parameters, and model-weights pinning.
+On first run the model weights are vendored to `Backend/models/` and their SHA-256 is
+logged — pin it with `FACEVAULT_WEIGHTS_SHA256` for offline, tamper-evident startups.
+Runtime state (search log, human feedback) lives in SQLite at `Backend/data/facevault.db`.
 
 **Tests** (also run in CI on every push):
 
