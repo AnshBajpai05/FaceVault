@@ -1,5 +1,14 @@
 # 🔐 FaceVault — Identity-Scoped Face Retrieval System
 
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![FAISS](https://img.shields.io/badge/FAISS-1.8-blue)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.2-EE4C2C?logo=pytorch&logoColor=white)
+![Tests](https://img.shields.io/badge/frontend_tests-passing-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 FaceVault is an **end-to-end identity-aware face search pipeline** that converts raw
 images into **searchable face instances**, builds **512-D embedding indexes**, and
 performs **identity-scoped retrieval with reliability controls** to prevent
@@ -33,6 +42,38 @@ So the pipeline integrates:
 ✔ human-interpretable UI feedback  
 
 This turns raw images into a **trustworthy identity-safe backend — not a similarity toy.**
+
+---
+
+## 🏗 Architecture
+
+```mermaid
+flowchart LR
+    subgraph UI["React Web UI"]
+        U[Upload photo] --> D[Face detection overlay<br/>select faces to search]
+        R[Confidence-grouped results<br/>+ HITL promote / reject]
+    end
+
+    subgraph API["FastAPI Backend"]
+        DET["/detect-faces<br/>MTCNN"]
+        S["/search<br/>crop selected faces"]
+        E[InceptionResnetV1<br/>512-D embedding]
+        ROUTE[Identity routing<br/>FAISS centroid index]
+        SCOPE[Identity-scoped retrieval<br/>recursive cluster expansion]
+        FILT[Centroid-similarity filter<br/>+ reliability flags]
+        FB[("feedback_log.jsonl<br/>HITL corrections")]
+    end
+
+    D -->|bounding boxes| S
+    U --> DET
+    S --> E --> ROUTE --> SCOPE --> FILT --> R
+    R -->|promote / reject| FB
+    FB -->|applied to every search| FILT
+```
+
+Routing decides **accepted / ambiguous / gray-zone / new-identity** before any
+retrieval happens; results are then filtered against the identity centroid and
+grouped by confidence — the UI never presents an uncertain match as certain.
 
 ---
 
@@ -136,14 +177,18 @@ This phase ensures FaceVault is **measurable, tunable & accountable.**
 
 FaceVault now ships with a **full-stack identity search platform:**
 
-#### 🔌 **FastAPI Backend**
-• `/detect-faces` — face region detection  
-• `/search-identity` — identity-scoped retrieval  
-• `/recent-searches` — audit-safe logging  
-• `/download-results` — bulk export ZIP  
-• health + logging hooks  
+#### 🔌 **FastAPI Backend** (`Backend/main.py`)
+• `POST /api/v1/detect-faces` — face region detection (MTCNN)  
+• `POST /api/v1/search` — identity-scoped retrieval; accepts optional `boxes` (JSON list of bounding boxes) so the exact user-selected faces are searched  
+• `GET /api/v1/photo/{face_id}` — serve a matched image (path-traversal-guarded)  
+• `POST /api/v1/download-results` — bulk export ZIP  
+• `POST /api/v1/feedback` — human-in-the-loop corrections, persisted to JSONL  
+• `GET /api/v1/recent-searches`, `GET /api/v1/stats`, `GET /api/v1/health`  
 
-Uploads are **memory-only** by default — no persistent storage unless enabled.
+Every response carries a real `X-Process-Time` header — the UI telemetry panel
+shows **measured** server time, never estimates.
+
+Uploads are **memory-only** — no persistent storage of query images.
 
 ---
 
@@ -211,6 +256,11 @@ The planned workflow:
 • trigger human approval  
 • register identity + update index incrementally  
 
+Also planned:
+
+• threshold auto-calibration driven by the human-feedback log  
+• Dockerfile + docker-compose for one-command deployment  
+
 This is **open for iteration / contribution.**
 
 ---
@@ -227,6 +277,29 @@ It is **not designed for surveillance.**
 
 ---
 
+## 🚀 Run Locally
+
+**Backend** (expects data assets under `Backend/data/`, see `Dataset_links.txt`):
+
+```bash
+cd Backend
+pip install -r ../requirements.txt
+uvicorn main:app --reload          # http://127.0.0.1:8000
+```
+
+**Frontend:**
+
+```bash
+cd Frontend
+npm install
+npm run dev                        # http://localhost:5173
+```
+
+Point the UI at a non-default backend with `VITE_API_ROOT`.
+Allowed CORS origins are configurable via `FACEVAULT_CORS_ORIGINS`.
+
+---
+
 ## 📄 Phase Documentation Index
 
 • `README_PHASE1.md`  
@@ -234,11 +307,7 @@ It is **not designed for surveillance.**
 • `README_PHASE3.md`  
 • `README_PHASE4.md`  
 
-Phase-6 UI/API docs live under:
-
-/api_docs
-/ui_docs
-
+Interactive API docs (Swagger) are served by FastAPI at `/docs` when the backend is running.
 
 ---
 
