@@ -129,14 +129,26 @@ High-recall **cosine similarity search at scale**
 Queries are first routed to the **most likely identity centroid**, and retrieval runs
 **only inside that identity pool**, then **filtered by centroid-similarity confidence**, this magnificently improves the query run time.
 
-Evaluated over **~10K live random queries:**
+**Re-evaluated with a strict held-out protocol** (`Backend/pipeline/evaluate.py` —
+query faces removed from the gallery so self-matches are impossible; 40 identities
+held out entirely as impostors; full results in `EDA/heldout_eval_summary.json`):
 
-| Metric                  | Value |
-|------------------------|------:|
-| **Mean Precision**     | **0.946** |
-| **Median Precision**   | **1.000** |
-| **Mean Recall**        | **0.865** |
-| **Avg Results / Query**| ~385 |
+| Metric (held-out, leak-free)     | Value |
+|----------------------------------|------:|
+| **Mean Precision**               | **0.955** |
+| **Median Precision**             | **1.000** |
+| **Mean Recall**                  | **0.873** |
+| **Routing Accuracy**             | 0.911 |
+| **Genuine FNMR** (wrongly told "no match") | 4.8% |
+| **Impostor correct-rejection**   | 57.5% ⚠ |
+| **Impostor false-accept**        | 8.3% ⚠ |
+
+Honest finding: retrieval quality for **known** identities holds up under a
+leak-free protocol, but **unknown people are under-rejected** — improving
+impostor rejection (open-set recognition) is the top open research item.
+
+(The original ~10K-query eval reported 0.946 / 0.865; its protocol allowed
+self-matches, so the held-out numbers above are the ones to trust.)
 
 This phase introduces **production-grade identity-safety controls**:
 

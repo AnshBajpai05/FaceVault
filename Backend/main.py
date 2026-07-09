@@ -38,7 +38,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from facenet_pytorch import MTCNN, InceptionResnetV1
 from PIL import Image, UnidentifiedImageError
 
@@ -73,12 +73,32 @@ app.add_middleware(
 )
 
 
+# In-process HTTP metrics: {(method, path_template, status): count} and
+# per-path latency accumulators. Reset on restart by design; durable business
+# metrics (search statuses, feedback) come from SQLite instead.
+_HTTP_COUNTS = defaultdict(int)
+_HTTP_LATENCY = defaultdict(lambda: [0.0, 0])  # path -> [sum_seconds, count]
+_METRICS_LOCK = threading.Lock()
+_STARTED_AT = time.time()
+
+
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
-    """Real server-side processing time; the UI telemetry panel reads this."""
+    """Real server-side processing time; the UI telemetry panel reads this.
+    Also feeds the /metrics counters."""
     start = time.perf_counter()
     response = await call_next(request)
-    response.headers["X-Process-Time"] = f"{time.perf_counter() - start:.4f}"
+    elapsed = time.perf_counter() - start
+    response.headers["X-Process-Time"] = f"{elapsed:.4f}"
+
+    path = request.url.path
+    if path.startswith("/api/v1/photo/"):
+        path = "/api/v1/photo/{face_id}"  # collapse per-face cardinality
+    with _METRICS_LOCK:
+        _HTTP_COUNTS[(request.method, path, response.status_code)] += 1
+        acc = _HTTP_LATENCY[path]
+        acc[0] += elapsed
+        acc[1] += 1
     return response
 
 
@@ -163,8 +183,12 @@ def load_embed_model():
                     f"Weights hash mismatch for {path}: got {digest}, "
                     f"expected {settings.weights_sha256}"
                 )
-        model = InceptionResnetV1(num_classes=8631)  # vggface2 head shape
+        # classify=True builds the 8631-way logits head so the full vggface2
+        # state dict loads strictly; flipped off afterwards so forward()
+        # returns embeddings.
+        model = InceptionResnetV1(classify=True, num_classes=8631)
         model.load_state_dict(torch.load(path, map_location="cpu"))
+        model.classify = False
         log.info("Loaded embedding weights from %s", path)
     else:
         log.warning("Local weights not found at %s — downloading once", path)
@@ -716,3 +740,50 @@ def get_stats():
 @app.get("/api/v1/recent-searches")
 def get_recent_searches():
     return db.recent_searches(limit=100)
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus text-format metrics.
+
+    A rising `facevault_searches_total{status="new_identity"}` rate is the
+    earliest signal that the input distribution has drifted away from the
+    indexed corpus.
+    """
+    lines = [
+        "# TYPE facevault_uptime_seconds gauge",
+        f"facevault_uptime_seconds {time.time() - _STARTED_AT:.0f}",
+        "# TYPE facevault_faces_indexed gauge",
+        f"facevault_faces_indexed {len(FACE_IDS)}",
+        "# TYPE facevault_identities gauge",
+        f"facevault_identities {len(IDENTITY_IDS)}",
+        "# TYPE facevault_feedback_rejected gauge",
+        f"facevault_feedback_rejected {len(REJECTED_FACE_IDS)}",
+        "# TYPE facevault_feedback_promoted gauge",
+        f"facevault_feedback_promoted {len(PROMOTED_FACE_IDS)}",
+    ]
+
+    lines.append("# TYPE facevault_searches_total counter")
+    for status, n in sorted(db.search_status_counts().items()):
+        lines.append(f'facevault_searches_total{{status="{status}"}} {n}')
+
+    lines.append("# TYPE facevault_feedback_total counter")
+    for action, n in sorted(db.feedback_action_counts().items()):
+        lines.append(f'facevault_feedback_total{{action="{action}"}} {n}')
+
+    with _METRICS_LOCK:
+        http_counts = dict(_HTTP_COUNTS)
+        latencies = {k: tuple(v) for k, v in _HTTP_LATENCY.items()}
+
+    lines.append("# TYPE facevault_http_requests_total counter")
+    for (method, path, status), n in sorted(http_counts.items()):
+        lines.append(
+            f'facevault_http_requests_total{{method="{method}",path="{path}",status="{status}"}} {n}'
+        )
+
+    lines.append("# TYPE facevault_http_request_seconds summary")
+    for path, (total, count) in sorted(latencies.items()):
+        lines.append(f'facevault_http_request_seconds_sum{{path="{path}"}} {total:.4f}')
+        lines.append(f'facevault_http_request_seconds_count{{path="{path}"}} {count}')
+
+    return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")

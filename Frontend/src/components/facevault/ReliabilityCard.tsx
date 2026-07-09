@@ -15,13 +15,15 @@ export function ReliabilityCard() {
 
           <p className="text-sm text-muted-foreground leading-relaxed mb-4">
             FaceVault is designed to return <strong className="text-foreground">as many correct
-            matches as possible</strong> while still preventing identity-mixing.  
-            In large-scale testing (<strong>10,000 searches</strong>), the system achieved:
+            matches as possible</strong> while still preventing identity-mixing.
+            Under a strict <strong>held-out evaluation</strong> (queries never in the gallery),
+            the system achieved:
             <br />
-            <strong className="text-foreground">94.6% average precision</strong> and 
-            <strong className="text-foreground"> 86.5% average recall</strong>.
+            <strong className="text-foreground">95.5% mean precision</strong> and
+            <strong className="text-foreground"> 87.3% mean recall</strong>.
             Low-confidence or ambiguous results are clearly grouped so you always
-            know what to trust.
+            know what to trust — and unknown faces may still be under-rejected
+            (open-set recognition is an active work item).
           </p>
 
           <div className="flex flex-wrap gap-3">

@@ -166,6 +166,24 @@ def all_feedback_ordered():
     ]
 
 
+def search_status_counts():
+    """All-time search counts by routing status (for /metrics)."""
+    with _LOCK:
+        rows = _conn.execute(
+            "SELECT status, COUNT(*) AS n FROM searches GROUP BY status"
+        ).fetchall()
+    return {r["status"]: r["n"] for r in rows}
+
+
+def feedback_action_counts():
+    """All-time feedback counts by action (for /metrics)."""
+    with _LOCK:
+        rows = _conn.execute(
+            "SELECT action, COUNT(*) AS n FROM feedback GROUP BY action"
+        ).fetchall()
+    return {r["action"]: r["n"] for r in rows}
+
+
 def recent_feedback(limit=1000):
     with _LOCK:
         rows = _conn.execute(

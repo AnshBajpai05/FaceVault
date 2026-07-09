@@ -1,0 +1,33 @@
+{
+  "protocol": {
+    "held_out_queries": true,
+    "self_match_possible": false,
+    "genuine_identities": 440,
+    "impostor_identities": 40,
+    "genuine_queries": 1320,
+    "impostor_queries": 120,
+    "seed": 42
+  },
+  "routing": {
+    "accuracy": 0.9113636363636364,
+    "status_counts": {
+      "accepted": 1161,
+      "new_identity": 64,
+      "ambiguous": 65,
+      "gray_zone": 30
+    },
+    "fnmr_new_identity_rate": 0.048484848484848485
+  },
+  "retrieval_over_searched_queries": {
+    "mean_precision": 0.9554140127388535,
+    "median_precision": 1.0,
+    "mean_recall": 0.8727283439490445,
+    "mean_results": 353.8136942675159
+  },
+  "impostors": {
+    "correct_rejection_rate": 0.575,
+    "false_accept_rate": 0.08333333333333333,
+    "any_results_rate": 0.4166666666666667
+  },
+  "runtime_seconds": 3.48
+}
