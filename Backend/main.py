@@ -15,7 +15,7 @@ import json
 import logging
 import mimetypes
 import os
-import pickle
+import re
 import threading
 import time
 import uuid
@@ -45,7 +45,6 @@ from PIL import Image, UnidentifiedImageError
 import db
 from config import settings
 from logic import (
-    MIN_RETRY,
     THRESH_STRONG,
     THRESH_WEAK,
     choose_threshold,
@@ -211,29 +210,97 @@ INFERENCE_LOCK = threading.Lock()
 
 
 # =========================================================
-#                  DATA ASSETS
+#        PERSISTENT STATE (SQLite) — init before corpus so
+#        identity tombstones can be applied during load
 # =========================================================
 DATA_DIR = settings.data_dir
 BASE_IMG_DIR = os.path.join(DATA_DIR, "VGGFace2")
+CUSTOM_DIR = os.path.join(DATA_DIR, "custom")
+CUSTOM_PHOTOS_DIR = os.path.join(CUSTOM_DIR, "photos")
+ENROLLED_META_PATH = os.path.join(CUSTOM_DIR, "enrolled_metadata.csv")
+ENROLLED_EMB_PATH = os.path.join(CUSTOM_DIR, "enrolled_embeddings.npy")
 
-META_DF = pd.read_csv(f"{DATA_DIR}/face_metadata.csv")
-META_DF["face_id"] = META_DF["face_id"].astype(str)
-
-EMB = np.load(f"{DATA_DIR}/face_embeddings.npy").astype("float32")
-FACE_IDS = (
-    pd.read_csv(f"{DATA_DIR}/face_embedding_index.csv")["face_id"].astype(str).tolist()
-)
-ID_TO_ROW = {fid: i for i, fid in enumerate(FACE_IDS)}
-
-with open(f"{DATA_DIR}/identity_ids.pkl", "rb") as f:
-    IDENTITY_IDS = pickle.load(f)
-identity_index = faiss.read_index(f"{DATA_DIR}/identity_faiss.index")
-
-
-# =========================================================
-#        PERSISTENT STATE (SQLite) + HITL FEEDBACK
-# =========================================================
 db.init(os.path.join(DATA_DIR, "facevault.db"))
+
+
+# =========================================================
+#     CORPUS (base pipeline artifacts + enrolled identities)
+# =========================================================
+def _load_corpus():
+    """Base pipeline artifacts plus any runtime-enrolled identities."""
+    meta = pd.read_csv(f"{DATA_DIR}/face_metadata.csv")
+    meta["face_id"] = meta["face_id"].astype(str)
+    emb = np.load(f"{DATA_DIR}/face_embeddings.npy").astype("float32")
+    face_ids = (
+        pd.read_csv(f"{DATA_DIR}/face_embedding_index.csv")["face_id"]
+        .astype(str)
+        .tolist()
+    )
+
+    if os.path.exists(ENROLLED_META_PATH) and os.path.exists(ENROLLED_EMB_PATH):
+        emeta = pd.read_csv(ENROLLED_META_PATH)
+        emeta["face_id"] = emeta["face_id"].astype(str)
+        eemb = np.load(ENROLLED_EMB_PATH).astype("float32")
+        if len(emeta) == len(eemb) and len(emeta) > 0:
+            meta = pd.concat([meta, emeta], ignore_index=True)
+            emb = np.vstack([emb, eemb])
+            face_ids += emeta["face_id"].tolist()
+            log.info("Loaded %d enrolled faces from %s", len(emeta), CUSTOM_DIR)
+
+    return meta, emb, face_ids
+
+
+META_DF, EMB, FACE_IDS = _load_corpus()
+
+# Apply erasure tombstones: deleted identities disappear from routing,
+# retrieval, and photo serving (their base embedding rows become unreachable).
+_tombstoned = db.deleted_identities()
+if _tombstoned:
+    before = len(META_DF)
+    META_DF = META_DF[~META_DF.identity_id.isin(_tombstoned)].reset_index(drop=True)
+    log.info(
+        "Applied %d identity tombstones (%d faces removed from corpus)",
+        len(_tombstoned),
+        before - len(META_DF),
+    )
+
+# Serializes all corpus mutations (enroll/delete); searches read the swapped
+# references without locking (single-worker deployment assumption).
+MUTATION_LOCK = threading.Lock()
+
+ID_TO_ROW = {}
+IDENTITY_IDS = []
+identity_index = None
+
+
+def rebuild_runtime_index():
+    """Recompute ID_TO_ROW and the identity-centroid FAISS index from the
+    current corpus. Called at startup and after every enroll/delete — the
+    on-disk identity_faiss.index is a pipeline artifact, not runtime truth."""
+    global ID_TO_ROW, IDENTITY_IDS, identity_index
+
+    id_to_row = {fid: i for i, fid in enumerate(FACE_IDS)}
+    idents = sorted(META_DF.identity_id.unique())
+
+    index = faiss.IndexFlatIP(EMB.shape[1] if len(EMB) else 512)
+    if idents:
+        centroids = np.stack(
+            [
+                normalize(
+                    EMB[[id_to_row[f] for f in group.face_id]].mean(axis=0)
+                )
+                for _, group in META_DF.groupby("identity_id")
+            ]
+        ).astype("float32")
+        index.add(centroids)
+
+    ID_TO_ROW, IDENTITY_IDS, identity_index = id_to_row, idents, index
+
+
+rebuild_runtime_index()
+log.info(
+    "Corpus ready: %d faces, %d identities", len(FACE_IDS), len(IDENTITY_IDS)
+)
 
 # One-time migration from the pre-SQLite JSONL feedback log
 _LEGACY_FEEDBACK = os.path.join(DATA_DIR, "feedback_log.jsonl")
@@ -325,19 +392,32 @@ def detect_best_crop(img_pil):
 #                PHASE-4: IDENTITY ROUTING
 # =========================================================
 def predict_identity(query_vec):
+    if identity_index is None or identity_index.ntotal == 0:
+        return dict(
+            status="new_identity", identity_id=None, best_sim=0.0,
+            second_sim=-1.0, margin=0.0, similarity=0.0,
+        )
+
     q = normalize(query_vec).reshape(1, -1)
-    sims, idxs = identity_index.search(q, TOP_K_ID)
+    sims, idxs = identity_index.search(q, min(TOP_K_ID, identity_index.ntotal))
 
     sims = sims[0]
     idxs = idxs[0]
 
     best_sim = float(sims[0])
     best_id = IDENTITY_IDS[idxs[0]]
-    second_sim = float(sims[1]) if len(sims) > 1 else -1.0
+    second_sim = float(sims[1]) if len(sims) > 1 and idxs[1] >= 0 else -1.0
     margin = best_sim - second_sim
 
     return dict(
-        status=route_status(best_sim, margin),
+        status=route_status(
+            best_sim,
+            margin,
+            min_accept=settings.min_accept,
+            min_gray=settings.min_gray,
+            min_retry=settings.min_retry,
+            margin_req=settings.margin_req,
+        ),
         identity_id=best_id,
         best_sim=best_sim,
         second_sim=second_sim,
@@ -480,7 +560,7 @@ def run_identity_search(q_vec, log_this=True):
         routing_reasons.append("ambiguous_identity_routing")
 
     if status == "new_identity":
-        if best_sim >= MIN_RETRY and identity:
+        if best_sim >= settings.min_retry and identity:
             status = "gray_zone"
             routing_flagged = True
             routing_reasons.append("fallback_retry_low_confidence")
@@ -552,7 +632,10 @@ def run_identity_search(q_vec, log_this=True):
 
 
 def resolve_photo_path(face_id: str):
-    """Map a face_id to its image file, refusing paths outside the dataset root."""
+    """Map a face_id to its image file, refusing paths outside the data roots.
+
+    Enrolled identities live under data/custom/photos/; base-corpus photos
+    live under the VGGFace2 root."""
     row = META_DF[META_DF.face_id == str(face_id)]
     if row.empty:
         return None
@@ -560,7 +643,8 @@ def resolve_photo_path(face_id: str):
     raw = str(row.iloc[0].photo_path)
     raw = raw.replace("/kaggle/input/vggface2", "").lstrip("/\\")
 
-    base = os.path.abspath(BASE_IMG_DIR)
+    root = DATA_DIR if raw.startswith("custom/") else BASE_IMG_DIR
+    base = os.path.abspath(root)
     local = os.path.abspath(os.path.join(base, raw))
 
     if not local.startswith(base + os.sep):
@@ -740,6 +824,162 @@ def get_stats():
 @app.get("/api/v1/recent-searches")
 def get_recent_searches():
     return db.recent_searches(limit=100)
+
+
+# =========================================================
+#         IDENTITY LIFECYCLE (enroll / delete / audit)
+# =========================================================
+_IDENTITY_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
+
+
+@app.post("/api/v1/identity/enroll", dependencies=[Depends(require_api_key)])
+def enroll_identity(
+    identity_id: str = Form(...),
+    note: str = Form(""),
+    images: list[UploadFile] = File(...),
+):
+    """Enroll (or extend) an identity from one or more photos.
+
+    The best face per photo is detected, embedded, persisted to the enrolled
+    store (data/custom/), and merged into the live corpus — no restart. The
+    action is recorded as an identity event for audit.
+    """
+    global META_DF, EMB, FACE_IDS
+
+    identity_id = identity_id.strip()
+    if not _IDENTITY_RE.match(identity_id):
+        raise HTTPException(status_code=400, detail="invalid_identity_id")
+
+    crops = []
+    for upload in images:
+        img = read_image_upload(upload)
+        crop = detect_best_crop(img)
+        if crop is not None:
+            crops.append((crop, upload.filename or "upload"))
+    if not crops:
+        raise HTTPException(status_code=400, detail="no_face_detected")
+
+    vectors = embed_faces_batch([c for c, _ in crops])
+
+    with MUTATION_LOCK:
+        os.makedirs(CUSTOM_PHOTOS_DIR, exist_ok=True)
+        new_rows = []
+        for (crop, fname), _vec in zip(crops, vectors):
+            fid = str(uuid.uuid4())
+            rel = f"custom/photos/{fid}.jpg"
+            crop.save(os.path.join(DATA_DIR, "custom", "photos", f"{fid}.jpg"), quality=95)
+            new_rows.append(
+                dict(
+                    face_id=fid,
+                    photo_id=fname,
+                    identity_id=identity_id,
+                    photo_path=rel,
+                    face_path=rel,
+                    x=0, y=0, w=crop.width, h=crop.height,
+                    confidence=1.0,
+                )
+            )
+
+        new_meta = pd.DataFrame(new_rows)
+        new_emb = np.stack(vectors).astype("float32")
+
+        # Persist to the enrolled store
+        if os.path.exists(ENROLLED_META_PATH) and os.path.exists(ENROLLED_EMB_PATH):
+            old_meta = pd.read_csv(ENROLLED_META_PATH)
+            old_emb = np.load(ENROLLED_EMB_PATH).astype("float32")
+            pd.concat([old_meta, new_meta], ignore_index=True).to_csv(
+                ENROLLED_META_PATH, index=False
+            )
+            np.save(ENROLLED_EMB_PATH, np.vstack([old_emb, new_emb]))
+        else:
+            new_meta.to_csv(ENROLLED_META_PATH, index=False)
+            np.save(ENROLLED_EMB_PATH, new_emb)
+
+        # Merge into the live corpus and refresh routing
+        META_DF = pd.concat([META_DF, new_meta], ignore_index=True)
+        EMB = np.vstack([EMB, new_emb])
+        FACE_IDS = FACE_IDS + [r["face_id"] for r in new_rows]
+        rebuild_runtime_index()
+
+    db.record_identity_event(
+        "enroll",
+        identity_id,
+        json.dumps({"faces_added": len(new_rows), "note": note}),
+    )
+    log.info("Enrolled %d face(s) for identity %s", len(new_rows), identity_id)
+
+    return {
+        "identity_id": identity_id,
+        "faces_added": len(new_rows),
+        "faces_total": int((META_DF.identity_id == identity_id).sum()),
+        "identities_total": len(IDENTITY_IDS),
+    }
+
+
+@app.delete("/api/v1/identity/{identity_id}", dependencies=[Depends(require_api_key)])
+def delete_identity(identity_id: str):
+    """Erase an identity from the system (right-to-be-forgotten path).
+
+    Removes it from routing, retrieval, and photo serving immediately;
+    a tombstone in SQLite keeps it out across restarts. Enrolled photo files
+    and embeddings are physically purged; base-corpus embedding rows become
+    permanently unreachable (their image files belong to the read-only
+    dataset and are not served once the metadata rows are gone).
+    """
+    global META_DF
+
+    with MUTATION_LOCK:
+        mask = META_DF.identity_id == identity_id
+        n = int(mask.sum())
+        if n == 0:
+            raise HTTPException(status_code=404, detail="identity_not_found")
+
+        custom_paths = [
+            p for p in META_DF[mask].photo_path.astype(str)
+            if p.startswith("custom/")
+        ]
+        META_DF = META_DF[~mask].reset_index(drop=True)
+
+        # Physically purge enrolled artifacts for this identity
+        if custom_paths and os.path.exists(ENROLLED_META_PATH):
+            old_meta = pd.read_csv(ENROLLED_META_PATH)
+            old_emb = np.load(ENROLLED_EMB_PATH).astype("float32")
+            keep = (old_meta.identity_id != identity_id).to_numpy()
+            old_meta[keep].to_csv(ENROLLED_META_PATH, index=False)
+            np.save(ENROLLED_EMB_PATH, old_emb[keep])
+        for rel in custom_paths:
+            try:
+                os.remove(os.path.join(DATA_DIR, rel))
+            except OSError:
+                pass
+
+        rebuild_runtime_index()
+
+    db.record_identity_event("delete", identity_id, json.dumps({"faces_removed": n}))
+    log.info("Deleted identity %s (%d faces)", identity_id, n)
+
+    return {
+        "deleted": identity_id,
+        "faces_removed": n,
+        "identities_remaining": len(IDENTITY_IDS),
+    }
+
+
+@app.get("/api/v1/identities")
+def list_identities(limit: int = 500):
+    counts = META_DF.groupby("identity_id").size().sort_index()
+    enrolled = set()
+    if os.path.exists(ENROLLED_META_PATH):
+        enrolled = set(pd.read_csv(ENROLLED_META_PATH).identity_id.astype(str))
+    return [
+        {"identity_id": str(ident), "faces": int(n), "enrolled": str(ident) in enrolled}
+        for ident, n in counts.head(limit).items()
+    ]
+
+
+@app.get("/api/v1/identity-events")
+def list_identity_events():
+    return db.identity_events()
 
 
 @app.get("/metrics")

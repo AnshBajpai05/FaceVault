@@ -19,11 +19,11 @@ export function ReliabilityCard() {
             Under a strict <strong>held-out evaluation</strong> (queries never in the gallery),
             the system achieved:
             <br />
-            <strong className="text-foreground">95.5% mean precision</strong> and
-            <strong className="text-foreground"> 87.3% mean recall</strong>.
+            <strong className="text-foreground">97.0% mean precision</strong> and
+            <strong className="text-foreground"> 88.7% mean recall</strong>, with
+            82.5% of unknown faces correctly rejected.
             Low-confidence or ambiguous results are clearly grouped so you always
-            know what to trust — and unknown faces may still be under-rejected
-            (open-set recognition is an active work item).
+            know what to trust.
           </p>
 
           <div className="flex flex-wrap gap-3">

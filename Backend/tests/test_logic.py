@@ -80,6 +80,13 @@ class TestRouteStatus:
         assert route_status(MIN_RETRY - 0.001, 0.5) == "new_identity"
         assert route_status(0.0, 0.0) == "new_identity"
 
+    def test_threshold_overrides(self):
+        # Sweep/tuning path: kwargs override the module defaults
+        assert route_status(0.52, 0.5, min_retry=0.50) == "gray_zone"
+        assert route_status(0.52, 0.5, min_retry=0.55) == "new_identity"
+        assert route_status(0.70, 0.06, margin_req=0.10) == "ambiguous"
+        assert route_status(0.70, 0.06, margin_req=0.05) == "accepted"
+
 
 # ---------------------------------------------------------
 # choose_threshold — adaptive centroid filter

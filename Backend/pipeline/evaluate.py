@@ -9,13 +9,15 @@ Protocol (leak-free by construction):
     they are not in the gallery.
   * Routing runs against gallery-only centroids; identity-scoped retrieval and
     the adaptive final filter replicate the production logic (same constants,
-    imported from logic.py).
+    imported from logic.py). Routing thresholds are overridable to study the
+    genuine-FNMR vs impostor-rejection trade-off.
 
 Runs on stored embeddings — no GPU, no torch, seconds not hours.
 
 Usage:
   python -m pipeline.evaluate --data-dir data --out data/eval \
-      --queries-per-identity 3 --impostor-identities 40 --seed 42
+      --queries-per-identity 3 --impostor-identities 40 --seed 42 \
+      [--min-accept 0.60 --min-gray 0.55 --min-retry 0.50 --margin-req 0.05]
 """
 
 import argparse
@@ -30,6 +32,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import logic  # noqa: E402
 from logic import (  # noqa: E402
     THRESH_STRONG,
     THRESH_WEAK,
@@ -89,30 +92,34 @@ def scoped_search(emb, gallery_rows, query_vec):
     return kept & (cos_centroid >= thresh)
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--data-dir", default="data")
-    ap.add_argument("--out", default=os.path.join("data", "eval"))
-    ap.add_argument("--queries-per-identity", type=int, default=3)
-    ap.add_argument("--min-faces", type=int, default=8,
-                    help="identities with fewer faces are skipped")
-    ap.add_argument("--impostor-identities", type=int, default=40)
-    ap.add_argument("--max-identities", type=int, default=0,
-                    help="0 = use all eligible identities")
-    ap.add_argument("--seed", type=int, default=42)
-    args = ap.parse_args()
+def run_eval(
+    data_dir="data",
+    queries_per_identity=3,
+    min_faces=8,
+    impostor_identities=40,
+    max_identities=0,
+    seed=42,
+    min_accept=logic.MIN_ACCEPT,
+    min_gray=logic.MIN_GRAY,
+    min_retry=logic.MIN_RETRY,
+    margin_req=logic.MARGIN_REQ,
+    _assets=None,
+):
+    """Run the held-out protocol; returns (summary, per_query).
 
-    rng = np.random.default_rng(args.seed)
+    Pass _assets=(emb, identity_rows) to reuse loaded data across sweep runs.
+    """
+    rng = np.random.default_rng(seed)
     t0 = time.time()
 
-    emb, identity_rows = load_assets(args.data_dir)
-    eligible = sorted(i for i, rows in identity_rows.items() if len(rows) >= args.min_faces)
+    emb, identity_rows = _assets if _assets else load_assets(data_dir)
+    eligible = sorted(i for i, rows in identity_rows.items() if len(rows) >= min_faces)
     rng.shuffle(eligible)
 
-    impostors = eligible[: args.impostor_identities]
-    genuine_ids = eligible[args.impostor_identities:]
-    if args.max_identities:
-        genuine_ids = genuine_ids[: args.max_identities]
+    impostors = eligible[:impostor_identities]
+    genuine_ids = eligible[impostor_identities:]
+    if max_identities:
+        genuine_ids = genuine_ids[:max_identities]
 
     # ---- Split queries / gallery, build gallery-only centroids ----
     queries = []  # (query_row, true_identity, is_impostor)
@@ -120,14 +127,14 @@ def main():
     for ident in genuine_ids:
         rows = np.array(identity_rows[ident])
         rng.shuffle(rows)
-        q = rows[: args.queries_per_identity]
-        g = rows[args.queries_per_identity:]
+        q = rows[:queries_per_identity]
+        g = rows[queries_per_identity:]
         gallery_by_identity[ident] = g
         queries += [(int(r), ident, False) for r in q]
     for ident in impostors:
         rows = np.array(identity_rows[ident])
         rng.shuffle(rows)
-        for r in rows[: args.queries_per_identity]:
+        for r in rows[:queries_per_identity]:
             queries.append((int(r), ident, True))
 
     centroid_ids = list(gallery_by_identity.keys())
@@ -143,7 +150,14 @@ def main():
         order = np.argsort(-sims)
         best, second = float(sims[order[0]]), float(sims[order[1]])
         routed = centroid_ids[order[0]]
-        status = route_status(best, best - second)
+        status = route_status(
+            best,
+            best - second,
+            min_accept=min_accept,
+            min_gray=min_gray,
+            min_retry=min_retry,
+            margin_req=margin_req,
+        )
 
         precision = recall = 0.0
         returned = 0
@@ -192,7 +206,13 @@ def main():
             "impostor_identities": len(impostors),
             "genuine_queries": len(genuine),
             "impostor_queries": len(imps),
-            "seed": args.seed,
+            "seed": seed,
+        },
+        "thresholds": {
+            "min_accept": min_accept,
+            "min_gray": min_gray,
+            "min_retry": min_retry,
+            "margin_req": margin_req,
         },
         "routing": {
             "accuracy": mean([r["routing_correct"] for r in genuine]),
@@ -218,6 +238,38 @@ def main():
         },
         "runtime_seconds": round(time.time() - t0, 2),
     }
+    return summary, per_query
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--data-dir", default="data")
+    ap.add_argument("--out", default=os.path.join("data", "eval"))
+    ap.add_argument("--queries-per-identity", type=int, default=3)
+    ap.add_argument("--min-faces", type=int, default=8,
+                    help="identities with fewer faces are skipped")
+    ap.add_argument("--impostor-identities", type=int, default=40)
+    ap.add_argument("--max-identities", type=int, default=0,
+                    help="0 = use all eligible identities")
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--min-accept", type=float, default=logic.MIN_ACCEPT)
+    ap.add_argument("--min-gray", type=float, default=logic.MIN_GRAY)
+    ap.add_argument("--min-retry", type=float, default=logic.MIN_RETRY)
+    ap.add_argument("--margin-req", type=float, default=logic.MARGIN_REQ)
+    args = ap.parse_args()
+
+    summary, per_query = run_eval(
+        data_dir=args.data_dir,
+        queries_per_identity=args.queries_per_identity,
+        min_faces=args.min_faces,
+        impostor_identities=args.impostor_identities,
+        max_identities=args.max_identities,
+        seed=args.seed,
+        min_accept=args.min_accept,
+        min_gray=args.min_gray,
+        min_retry=args.min_retry,
+        margin_req=args.margin_req,
+    )
 
     os.makedirs(args.out, exist_ok=True)
     csv_path = os.path.join(args.out, "eval_per_query.csv")

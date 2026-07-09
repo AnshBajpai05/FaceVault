@@ -32,6 +32,15 @@ CREATE TABLE IF NOT EXISTS feedback (
     threshold_used REAL
 );
 CREATE INDEX IF NOT EXISTS idx_feedback_ts ON feedback (ts);
+
+CREATE TABLE IF NOT EXISTS identity_events (
+    id          TEXT PRIMARY KEY,
+    ts          TEXT NOT NULL,
+    action      TEXT NOT NULL,     -- 'enroll' | 'delete'
+    identity_id TEXT NOT NULL,
+    detail      TEXT               -- free-form JSON (faces added, note, ...)
+);
+CREATE INDEX IF NOT EXISTS idx_identity_events_ts ON identity_events (ts);
 """
 
 
@@ -161,6 +170,57 @@ def all_feedback_ordered():
             "action": r["action"],
             "face_id": r["face_id"],
             "threshold_used": r["threshold_used"],
+        }
+        for r in rows
+    ]
+
+
+# ---------------- identity lifecycle ----------------
+
+def record_identity_event(action, identity_id, detail=None):
+    record = {
+        "id": str(uuid.uuid4()),
+        "timestamp": _now(),
+        "action": action,
+        "identity_id": str(identity_id),
+        "detail": detail,
+    }
+    with _LOCK, _conn:
+        _conn.execute(
+            "INSERT INTO identity_events (id, ts, action, identity_id, detail)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (record["id"], record["timestamp"], action, record["identity_id"], detail),
+        )
+    return record
+
+
+def deleted_identities():
+    """Identities whose most recent lifecycle event is 'delete' (a later
+    enroll revives the identity)."""
+    with _LOCK:
+        rows = _conn.execute(
+            "SELECT identity_id, action FROM identity_events ORDER BY ts ASC"
+        ).fetchall()
+    state = {}
+    for r in rows:
+        state[r["identity_id"]] = r["action"]
+    return {ident for ident, action in state.items() if action == "delete"}
+
+
+def identity_events(limit=200):
+    with _LOCK:
+        rows = _conn.execute(
+            "SELECT id, ts, action, identity_id, detail FROM identity_events"
+            " ORDER BY ts DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "timestamp": r["ts"],
+            "action": r["action"],
+            "identity_id": r["identity_id"],
+            "detail": r["detail"],
         }
         for r in rows
     ]

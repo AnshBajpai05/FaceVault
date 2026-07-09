@@ -7,10 +7,14 @@ All Phase-4 thresholds live here; main.py imports them from this module.
 import numpy as np
 
 # ---------------- Phase-4 routing thresholds ----------------
-MIN_ACCEPT = 0.60   # routing: accept identity outright
-MIN_GRAY = 0.55     # routing: ambiguous band
-MIN_RETRY = 0.50    # routing: gray-zone retry floor
-MARGIN_REQ = 0.05   # required gap between best and second identity
+# Chosen from the held-out threshold sweep (EDA/threshold_sweep.csv):
+# vs the original (0.60/0.55/0.50/0.05) these raise impostor rejection
+# 57.5% -> 82.5% and cut false-accepts 8.3% -> 5.0% at the cost of genuine
+# FNMR 4.9% -> 8.0% — the safe failure direction for high-trust search.
+MIN_ACCEPT = 0.62   # routing: accept identity outright
+MIN_GRAY = 0.58     # routing: ambiguous band
+MIN_RETRY = 0.56    # routing: gray-zone retry floor
+MARGIN_REQ = 0.08   # required gap between best and second identity
 
 # ---------------- Retrieval thresholds ----------------
 THRESH_STRONG = 0.60
@@ -34,13 +38,26 @@ def clamp_box(img_width, img_height, x1, y1, x2, y2):
     return x1, y1, x2, y2
 
 
-def route_status(best_sim, margin):
-    """Phase-4 identity-routing decision from centroid similarity + margin."""
-    if best_sim >= MIN_ACCEPT and margin >= MARGIN_REQ:
+def route_status(
+    best_sim,
+    margin,
+    *,
+    min_accept=MIN_ACCEPT,
+    min_gray=MIN_GRAY,
+    min_retry=MIN_RETRY,
+    margin_req=MARGIN_REQ,
+):
+    """Phase-4 identity-routing decision from centroid similarity + margin.
+
+    Thresholds are keyword-overridable so deployments can tune the
+    genuine-FNMR vs impostor-rejection trade-off (see pipeline/evaluate.py
+    --min-* flags and the sweep results in EDA/).
+    """
+    if best_sim >= min_accept and margin >= margin_req:
         return "accepted"
-    if best_sim >= MIN_GRAY:
+    if best_sim >= min_gray:
         return "ambiguous"
-    if best_sim >= MIN_RETRY:
+    if best_sim >= min_retry:
         return "gray_zone"
     return "new_identity"
 

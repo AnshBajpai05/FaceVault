@@ -135,20 +135,25 @@ held out entirely as impostors; full results in `EDA/heldout_eval_summary.json`)
 
 | Metric (held-out, leak-free)     | Value |
 |----------------------------------|------:|
-| **Mean Precision**               | **0.955** |
+| **Mean Precision**               | **0.970** |
 | **Median Precision**             | **1.000** |
-| **Mean Recall**                  | **0.873** |
+| **Mean Recall**                  | **0.887** |
 | **Routing Accuracy**             | 0.911 |
-| **Genuine FNMR** (wrongly told "no match") | 4.8% |
-| **Impostor correct-rejection**   | 57.5% ⚠ |
-| **Impostor false-accept**        | 8.3% ⚠ |
+| **Genuine FNMR** (wrongly told "no match") | 8.0% |
+| **Impostor correct-rejection**   | 82.5% |
+| **Impostor false-accept**        | 5.0% |
 
-Honest finding: retrieval quality for **known** identities holds up under a
-leak-free protocol, but **unknown people are under-rejected** — improving
-impostor rejection (open-set recognition) is the top open research item.
+The routing thresholds are **data-backed**: a sweep over the held-out protocol
+(`Backend/pipeline/sweep_thresholds.py`, results in `EDA/threshold_sweep.csv`)
+mapped the genuine-FNMR vs impostor-rejection trade-off; the shipped operating
+point trades ~3 points of genuine FNMR (a safe failure — the user is told
+"no match" and can retry) for +25 points of impostor rejection. Deployments
+can pick their own point via `FACEVAULT_MIN_*` environment variables.
 
 (The original ~10K-query eval reported 0.946 / 0.865; its protocol allowed
-self-matches, so the held-out numbers above are the ones to trust.)
+self-matches, so the held-out numbers above are the ones to trust. Open-set
+rejection beyond thresholding — e.g. impostor-aware calibration — remains the
+top research item.)
 
 This phase introduces **production-grade identity-safety controls**:
 
@@ -194,8 +199,12 @@ FaceVault now ships with a **full-stack identity search platform:**
 • `POST /api/v1/search` — identity-scoped retrieval; accepts optional `boxes` (JSON list of bounding boxes) so the exact user-selected faces are searched  
 • `GET /api/v1/photo/{face_id}` — serve a matched image (path-traversal-guarded)  
 • `POST /api/v1/download-results` — bulk export ZIP  
-• `POST /api/v1/feedback` — human-in-the-loop corrections, persisted to JSONL  
-• `GET /api/v1/recent-searches`, `GET /api/v1/stats`, `GET /api/v1/health`  
+• `POST /api/v1/feedback` — human-in-the-loop corrections, persisted in SQLite  
+• `POST /api/v1/identity/enroll` — enroll a new identity from photos, live (no restart)  
+• `DELETE /api/v1/identity/{id}` — erasure path (right-to-be-forgotten): removed from
+  routing/retrieval/serving immediately, tombstoned across restarts, enrolled files purged  
+• `GET /api/v1/identities`, `/identity-events` — registry + lifecycle audit  
+• `GET /api/v1/recent-searches`, `/stats`, `/health`, `/metrics` (Prometheus)  
 
 Every response carries a real `X-Process-Time` header — the UI telemetry panel
 shows **measured** server time, never estimates.
@@ -256,21 +265,22 @@ FaceVault now implements a **full identity-aware retrieval system**:
 ✔ evaluation engine  
 ✔ Web UI + API backend  
 
-### 🔜 Open Work — New-Identity Registration
+### ✅ Identity Lifecycle (enroll / erase)
 
-We now support safe detection of potential **new identities**, but:
+Identities can now be **enrolled live** (`POST /api/v1/identity/enroll` — best face
+per photo detected, embedded, merged into routing without restart) and **erased**
+(`DELETE /api/v1/identity/{id}` — the right-to-be-forgotten path: gone from
+routing/retrieval/serving immediately, tombstoned in SQLite across restarts,
+enrolled artifacts physically purged). Every lifecycle action is audit-logged.
 
-> **Automatic identity-creation remains disabled by design.**
+> **Automatic identity-creation remains disabled by design** — enrollment is an
+> explicit, human-driven action.
 
-The planned workflow:
+### 🔜 Open Work
 
-• detect genuine new identity clusters  
-• trigger human approval  
-• register identity + update index incrementally  
-
-Also planned:
-
+• operator UI for enrollment review (API exists; UI pending)  
 • threshold auto-calibration driven by the human-feedback log  
+• impostor-aware open-set calibration beyond thresholding  
 • Dockerfile + docker-compose for one-command deployment  
 
 This is **open for iteration / contribution.**

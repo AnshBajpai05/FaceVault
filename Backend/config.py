@@ -70,6 +70,13 @@ class Settings:
     top_k_results: int = field(default_factory=lambda: _env_int("FACEVAULT_TOP_K", 800))
     max_expansion_iters: int = field(default_factory=lambda: _env_int("FACEVAULT_MAX_ITERS", 3))
 
+    # ---- Routing thresholds (genuine-FNMR vs impostor-rejection trade-off;
+    # sweep with: python -m pipeline.sweep_thresholds) ----
+    min_accept: float = field(default_factory=lambda: _env_float("FACEVAULT_MIN_ACCEPT", 0.62))
+    min_gray: float = field(default_factory=lambda: _env_float("FACEVAULT_MIN_GRAY", 0.58))
+    min_retry: float = field(default_factory=lambda: _env_float("FACEVAULT_MIN_RETRY", 0.56))
+    margin_req: float = field(default_factory=lambda: _env_float("FACEVAULT_MARGIN_REQ", 0.08))
+
     def origins_list(self):
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 

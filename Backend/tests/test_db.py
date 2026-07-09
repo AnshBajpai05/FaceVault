@@ -86,5 +86,28 @@ class TestFeedback:
         assert db.import_legacy_feedback(legacy) == 0
 
 
+class TestIdentityEvents:
+    def test_record_and_list(self):
+        db.record_identity_event("enroll", "person-1", '{"faces_added": 2}')
+        db.record_identity_event("delete", "person-2")
+
+        events = db.identity_events()
+        assert len(events) == 2
+        assert events[0]["action"] == "delete"  # newest first
+        assert events[1]["identity_id"] == "person-1"
+
+    def test_deleted_identities_latest_event_wins(self):
+        db.record_identity_event("delete", "a")
+        db.record_identity_event("enroll", "b")
+        db.record_identity_event("delete", "b")
+        db.record_identity_event("delete", "c")
+        db.record_identity_event("enroll", "c")  # re-enroll revives c
+
+        assert db.deleted_identities() == {"a", "b"}
+
+    def test_no_events_no_tombstones(self):
+        assert db.deleted_identities() == set()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

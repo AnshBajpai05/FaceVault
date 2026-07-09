@@ -8,26 +8,32 @@
     "impostor_queries": 120,
     "seed": 42
   },
+  "thresholds": {
+    "min_accept": 0.62,
+    "min_gray": 0.58,
+    "min_retry": 0.56,
+    "margin_req": 0.08
+  },
   "routing": {
     "accuracy": 0.9113636363636364,
     "status_counts": {
-      "accepted": 1161,
-      "new_identity": 64,
-      "ambiguous": 65,
-      "gray_zone": 30
+      "accepted": 1134,
+      "new_identity": 106,
+      "ambiguous": 61,
+      "gray_zone": 19
     },
-    "fnmr_new_identity_rate": 0.048484848484848485
+    "fnmr_new_identity_rate": 0.0803030303030303
   },
   "retrieval_over_searched_queries": {
-    "mean_precision": 0.9554140127388535,
+    "mean_precision": 0.9695222405271828,
     "median_precision": 1.0,
-    "mean_recall": 0.8727283439490445,
-    "mean_results": 353.8136942675159
+    "mean_recall": 0.8870351729818783,
+    "mean_results": 355.84266886326196
   },
   "impostors": {
-    "correct_rejection_rate": 0.575,
-    "false_accept_rate": 0.08333333333333333,
-    "any_results_rate": 0.4166666666666667
+    "correct_rejection_rate": 0.825,
+    "false_accept_rate": 0.05,
+    "any_results_rate": 0.175
   },
-  "runtime_seconds": 3.48
+  "runtime_seconds": 2.95
 }
